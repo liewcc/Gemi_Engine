@@ -2153,4 +2153,5 @@ async def clear_upscaler_logs():
 if __name__ == "__main__":
     # The _silence_proactor_pipe_errors handler is already installed on the
     # event loop above (at module load time), so uvicorn will inherit it.
-    uvicorn.run(app, host="127.0.0.1", port=18800, access_log=False)
+    _port = int(os.environ.get("BROWSER_ENGINE_PORT", 18800))
+    uvicorn.run(app, host="127.0.0.1", port=_port, access_log=False)
