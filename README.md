@@ -1,4 +1,4 @@
-# browser-ai-engine
+# Gemi_Engine
 
 Shared browser automation engine for Gemini and DeepSeek web UIs.
 
