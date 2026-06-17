@@ -4,6 +4,9 @@ import copy
 import logging
 
 def get_project_root():
+    env_root = os.environ.get("BROWSER_ENGINE_PROJECT_ROOT")
+    if env_root:
+        return env_root
     return os.path.dirname(os.path.abspath(os.path.dirname(__file__)))
 
 def get_config_path():
