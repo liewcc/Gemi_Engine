@@ -332,7 +332,8 @@ class GeminiProvider(ProviderAdapter):
             _UPLOAD_LABEL_JS = '''Array.from(document.querySelectorAll(
                     'mat-action-list button[role="menuitem"]'
                 )).map(btn => {
-                    const el = btn.querySelector('.menu-text.gem-menu-item-label')
+                    const el = btn.querySelector('span.gem-menu-item-label')
+                             || btn.querySelector('.menu-text.gem-menu-item-label')
                              || btn.querySelector('.menu-text')
                              || btn.querySelector('.gem-menu-item-label')
                              || btn.querySelector('.mdc-list-item__primary-text');
@@ -353,7 +354,7 @@ class GeminiProvider(ProviderAdapter):
                 main_tools.append("More uploads")
                 try:
                     await self._page.click('button.more-upload-button')
-                    await asyncio.sleep(0.6)
+                    await asyncio.sleep(1.2)
                     all_upload: list = await self._page.evaluate(f'() => ({_UPLOAD_LABEL_JS})')
                     base_set = set(upload_base)
                     sub_tools["More uploads"] = [t for t in all_upload if t not in base_set]
@@ -533,8 +534,9 @@ class GeminiProvider(ProviderAdapter):
                 try:
                     await self._page.wait_for_selector(
                         'mat-action-list button[role="menuitem"]',
-                        state='visible', timeout=3000
+                        state='visible', timeout=5000
                     )
+                    await asyncio.sleep(0.5)
                     drawer_opened = True
                     self._log(f"Tool drawer open (upload buttons visible), looking for: {tool_name}")
                 except Exception:
@@ -547,7 +549,8 @@ class GeminiProvider(ProviderAdapter):
                             'mat-action-list button[role="menuitem"]'
                         ));
                         const target = btns.find(b => {{
-                            const el = b.querySelector(".menu-text.gem-menu-item-label")
+                            const el = b.querySelector("span.gem-menu-item-label")
+                                    || b.querySelector(".menu-text.gem-menu-item-label")
                                     || b.querySelector(".menu-text")
                                     || b.querySelector(".gem-menu-item-label")
                                     || b.querySelector(".mdc-list-item__primary-text");
