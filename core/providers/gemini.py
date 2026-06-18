@@ -408,15 +408,20 @@ class GeminiProvider(ProviderAdapter):
             await asyncio.sleep(0.3)
             await self._page.keyboard.press("Escape")
 
-            # Only persist current selections — available options are always live-scanned
+            # Persist discovered capabilities
             try:
-                save_config({
-                    "discovery": {
-                        "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "current_model": results["current_model"],
-                        "current_thinking_level": results["current_thinking_level"],
-                    }
+                cfg = load_config()
+                disc = cfg.get("discovery", {})
+                disc.update({
+                    "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "current_model": results["current_model"],
+                    "current_thinking_level": results["current_thinking_level"],
+                    "available_models": results["models"],
+                    "available_thinking_levels": results["thinking_levels"],
+                    "available_tools": results["main_tools"],
+                    "sub_tools": results["sub_tools"]
                 })
+                save_config({"discovery": disc})
                 self._log(
                     f"Discovery complete. "
                     f"Models: {results['models']}, "

@@ -24,10 +24,14 @@ DEFAULT_CONFIG = {
     "browser_url": "https://gemini.google.com/app",
     "prompt": "",
     "selected_tool": "",
+    "selected_sub_tool": "",
     "selected_model": "",
+    "selected_thinking_level": "",
     "discovery": {
         "available_tools": [],
-        "available_models": []
+        "available_models": [],
+        "available_thinking_levels": [],
+        "sub_tools": {}
     },
     "automation": {
         "auto_looping": False,

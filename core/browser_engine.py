@@ -718,7 +718,69 @@ class BrowserEngine:
                         if self._stop_automation_event.is_set(): break
                         await asyncio.sleep(2.0)
                         
-                        await self.apply_settings(model_name=cfg.get("selected_model"), tool_name=cfg.get("selected_tool"))
+                        # Live scan capabilities to validate settings on new chat
+                        self._log_debug("Performing live discovery scan at new chat...")
+                        discovery_res = await self.discover_capabilities()
+                        
+                        # Reload config to get latest user settings
+                        cfg = load_config()
+                        
+                        sel_model = cfg.get("selected_model")
+                        sel_tool = cfg.get("selected_tool")
+                        sel_sub_tool = cfg.get("selected_sub_tool")
+                        sel_thinking = cfg.get("selected_thinking_level")
+                        
+                        model_to_apply = sel_model
+                        tool_to_apply = sel_sub_tool or sel_tool
+                        thinking_to_apply = sel_thinking
+                        
+                        if discovery_res.get("status") == "success":
+                            discovered = discovery_res.get("data", {})
+                            models = discovered.get("models", [])
+                            main_tools = discovered.get("main_tools", [])
+                            sub_tools = discovered.get("sub_tools", {})
+                            thinking_levels = discovered.get("thinking_levels", [])
+                            
+                            # Validate model (only invalidate if list is non-empty, otherwise assume transient error)
+                            if sel_model and models:
+                                if sel_model not in models:
+                                    self._log_debug(f"Selected model '{sel_model}' not found in live scan. Leaving empty.")
+                                    model_to_apply = None
+                                
+                            # Validate thinking level (only invalidate if list is non-empty)
+                            if sel_thinking and thinking_levels:
+                                if sel_thinking not in thinking_levels:
+                                    self._log_debug(f"Selected thinking level '{sel_thinking}' not found in live scan. Leaving empty.")
+                                    thinking_to_apply = None
+                                
+                            # Validate tool & sub-tool
+                            if sel_tool and main_tools:
+                                if sel_tool in main_tools:
+                                    if sel_tool in sub_tools:
+                                        # It has a sub-menu
+                                        if sel_sub_tool and sub_tools[sel_tool]:
+                                            if sel_sub_tool in sub_tools[sel_tool]:
+                                                tool_to_apply = sel_sub_tool
+                                            else:
+                                                self._log_debug(f"Selected sub-tool '{sel_sub_tool}' not found under '{sel_tool}'. Leaving empty.")
+                                                tool_to_apply = None
+                                        else:
+                                            # Sub-tools list is empty, but category is in main_tools. Fallback to category if no sub-tool is valid
+                                            tool_to_apply = sel_sub_tool
+                                    else:
+                                        # Standard tool
+                                        tool_to_apply = sel_tool
+                                else:
+                                    self._log_debug(f"Selected tool '{sel_tool}' not found in live scan. Leaving empty.")
+                                    tool_to_apply = None
+                        else:
+                            self._log_debug(f"Discovery scan failed: {discovery_res.get('message')}. Applying settings directly from config.")
+                        
+                        await self.apply_settings(
+                            model_name=model_to_apply,
+                            tool_name=tool_to_apply,
+                            thinking_level=thinking_to_apply
+                        )
                         if self._stop_automation_event.is_set(): break
                         
                         has_files = bool(cfg.get("selected_files"))
