@@ -519,6 +519,11 @@ class GeminiProvider(ProviderAdapter):
                         if (b) b.click();
                     }''')
                 await asyncio.sleep(1.0)
+                try:
+                    await self._page.wait_for_selector('mat-action-list', timeout=3000)
+                    self._log(f"Tool drawer open, looking for: {tool_name}")
+                except Exception:
+                    self._log("Tool drawer content not detected — proceeding anyway")
 
                 def _js_match_upload(name: str) -> str:
                     # Photos uses .menu-text.gem-menu-item-label; Notebooks uses .gem-menu-item-label only
@@ -555,6 +560,7 @@ class GeminiProvider(ProviderAdapter):
                 clicked = await self._page.evaluate(_js_match_upload(tool_name), tool_name)
 
                 if not clicked:
+                    self._log(f"Pass 1 (upload base) miss for '{tool_name}' — trying more-upload expansion")
                     # Pass 2: expand "More uploads" then retry (Photos, Notebooks)
                     more_up = self._page.locator('button.more-upload-button').first
                     if await more_up.is_visible(timeout=1000):
@@ -570,6 +576,7 @@ class GeminiProvider(ProviderAdapter):
                     clicked = await self._page.evaluate(_js_match_ai(tool_name), tool_name)
 
                 if not clicked:
+                    self._log(f"Pass 3 (ai base) miss for '{tool_name}' — trying more-tools expansion")
                     # Pass 4: expand "More tools" then retry (Create music, Guided learning)
                     more_tools = self._page.locator('button.more-tools-button').first
                     if await more_tools.is_visible(timeout=1000):
@@ -578,6 +585,7 @@ class GeminiProvider(ProviderAdapter):
                         clicked = await self._page.evaluate(_js_match_ai(tool_name), tool_name)
 
                 await asyncio.sleep(1.0)
+                self._log(f"Tool click result: {'ok' if clicked else 'not found'} for '{tool_name}'")
                 applied.append(f"tool={'ok' if clicked else 'not found'}")
 
             summary = ", ".join(applied) if applied else "nothing to apply"
