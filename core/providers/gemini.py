@@ -339,7 +339,7 @@ class GeminiProvider(ProviderAdapter):
                     return el ? el.innerText.split("\\n")[0].trim() : '';
                 }).filter(t => t.length > 0)'''
 
-            upload_base: list = await self._page.evaluate(f'() => {{{_UPLOAD_LABEL_JS}}}')
+            upload_base: list = await self._page.evaluate(f'() => ({_UPLOAD_LABEL_JS})')
             main_tools.extend(upload_base)
 
             # ── Step B: "More uploads" marker + sub-items (Photos, Notebooks) ──
@@ -354,7 +354,7 @@ class GeminiProvider(ProviderAdapter):
                 try:
                     await self._page.click('button.more-upload-button')
                     await asyncio.sleep(0.6)
-                    all_upload: list = await self._page.evaluate(f'() => {{{_UPLOAD_LABEL_JS}}}')
+                    all_upload: list = await self._page.evaluate(f'() => ({_UPLOAD_LABEL_JS})')
                     base_set = set(upload_base)
                     sub_tools["More uploads"] = [t for t in all_upload if t not in base_set]
                 except Exception as exc:
