@@ -503,21 +503,29 @@ class GeminiProvider(ProviderAdapter):
                     applied.append("thinking=no submenu item")
 
                 await self._page.keyboard.press("Escape")
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(1.0)
 
             # 3. Apply Tool
             if tool_name:
                 self._log(f"Applying tool: {tool_name}")
                 # Open Tools drawer
-                btn = self._page.locator('button.toolbox-drawer-button').first
-                if await btn.is_visible(timeout=2000):
-                    await btn.click()
-                    self._log("Toolbox drawer button clicked (Playwright)")
-                else:
-                    self._log("Toolbox drawer button not visible — trying JS fallback")
+                opened_drawer = False
+                for sel in ['button[aria-label="Upload & tools"]', 'button.toolbox-drawer-button']:
+                    try:
+                        loc = self._page.locator(sel).first
+                        if await loc.is_visible(timeout=1500):
+                            await loc.click()
+                            self._log(f"Toolbox drawer opened via: {sel}")
+                            opened_drawer = True
+                            break
+                    except Exception:
+                        pass
+                if not opened_drawer:
+                    self._log("Toolbox drawer button not found — trying JS fallback")
                     await self._page.evaluate('''() => {
                         const b = Array.from(document.querySelectorAll("button"))
-                                       .find(b => b.innerText.includes("Tools"));
+                                       .find(b => b.getAttribute("aria-label") === "Upload & tools"
+                                               || b.classList.contains("toolbox-drawer-button"));
                         if (b) b.click();
                     }''')
                 await asyncio.sleep(1.0)
