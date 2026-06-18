@@ -722,8 +722,8 @@ class BrowserEngine:
                         self._log_debug("Performing live discovery scan at new chat...")
                         discovery_res = await self.discover_capabilities()
                         
-                        # Reload config to get latest user settings
-                        cfg = load_config()
+                        # Reload config to get latest user settings, but merge with settings config to preserve dynamically injected values (e.g. aspect ratio)
+                        cfg = {**load_config(), **settings.get("config", {})}
                         
                         sel_model = cfg.get("selected_model")
                         sel_tool = cfg.get("selected_tool")

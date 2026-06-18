@@ -28,6 +28,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # engine_service.py lives on disk.
 _DATA_DIR = os.environ.get("BROWSER_ENGINE_DATA_DIR") or os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.environ.get("BROWSER_ENGINE_PROJECT_ROOT") or os.path.dirname(_DATA_DIR)
+if _DATA_DIR not in sys.path:
+    sys.path.insert(0, _DATA_DIR)
 import asyncio
 import time
 import json

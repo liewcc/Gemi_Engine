@@ -1001,13 +1001,21 @@ class GeminiProvider(ProviderAdapter):
                     'mat-icon[fonticon="send_spark"]',
                 ];
                 const _inSendMode = _sendModeSelectors.some(s => !!document.querySelector(s));
-                const sendReady = _inSendMode && !!(
+                const sendButtonExists = _sendModeSelectors.some(s => !!document.querySelector(s)) || !!(
+                    document.querySelector('[data-test-id="send-button-container"]') ||
+                    document.querySelector('gem-icon-button.send-button') ||
+                    document.querySelector('gem-icon-button.submit') ||
+                    document.querySelector('button[aria-label="Send message"]') ||
+                    document.querySelector('button[aria-label*="Send" i]')
+                );
+                const isGenerating = !!(stopIcon || isVisible(progressBar) || isVisible(activeLoadingContainer));
+                const sendReady = (_inSendMode && !!(
                     document.querySelector('[data-test-id="send-button-container"].visible') ||
                     document.querySelector('gem-icon-button.send-button[aria-disabled="false"]') ||
                     document.querySelector('gem-icon-button.submit[aria-disabled="false"]') ||
                     document.querySelector('button[aria-label="Send message"]:not([disabled])') ||
                     document.querySelector('button[aria-label*="Send" i]:not([disabled])')
-                );
+                )) || (!isGenerating && !sendButtonExists);
 
                 if (sendReady) {
                     let allResps = Array.from(document.querySelectorAll('model-response, structured-content-container.model-response-text, message-content'));
@@ -1092,6 +1100,7 @@ class GeminiProvider(ProviderAdapter):
                 last_logged_text = resp_text
 
             if status == "generating":
+                idle_start_time = None
                 if not has_started_generating:
                     has_started_generating = True
                     start_gen_time = current_time
@@ -1269,15 +1278,11 @@ class GeminiProvider(ProviderAdapter):
         await asyncio.sleep(0.5)
 
         # 2. Click redo/refresh button (target the latest turn's button)
-        result = await self._page.evaluate('''async () => {
+        btn_info = await self._page.evaluate('''() => {
             const findLastBtn = (sel) => {
                 const btns = Array.from(document.querySelectorAll(sel));
                 return btns.length > 0 ? btns[btns.length - 1] : null;
             };
-            const findByText = (txt) => Array.from(document.querySelectorAll('.menu-text, span, button'))
-                                            .reverse()
-                                            .find(b => b.innerText.toLowerCase().includes(txt));
-
             const allIcons = Array.from(document.querySelectorAll('mat-icon[data-mat-icon-name="refresh"], mat-icon[fonticon="refresh"]'));
             const refreshIcon = allIcons.length > 0 ? allIcons[allIcons.length - 1] : null;
 
@@ -1290,37 +1295,66 @@ class GeminiProvider(ProviderAdapter):
 
             if (redoBtn) {
                 redoBtn.scrollIntoView({behavior: "instant", block: "center"});
-                redoBtn.click();
-
-                // Wait briefly for sub-menu if it exists
-                await new Promise(r => setTimeout(r, 1000));
-
-                let tryAgain = findByText("try again");
-                if (tryAgain) {
-                    tryAgain.click();
-                    return "REDO_WITH_TRY_AGAIN";
-                }
-                return "REDO_CLICKED";
+                redoBtn.setAttribute('data-automation-temp-redo', 'true');
+                return "found";
             }
-            return "NOT_FOUND";
+            return "not_found";
         }''')
 
-        if result != "NOT_FOUND":
-            self._log(f"Redo triggered: {result}")
-            # Ensure the UI has transitioned to 'generating' before returning
-            for _ in range(15):
-                await asyncio.sleep(0.5)
-                is_gen = await self._page.evaluate('''() => {
-                    return !!document.querySelector('mat-progress-bar') ||
-                           !!document.querySelector('mat-icon[data-mat-icon-name="stop"]') ||
-                           !!document.querySelector('section.processing-state_container--processing');
-                }''')
-                if is_gen:
-                    break
-            return {"status": "success", "message": f"Redo action sent ({result})."}
-        else:
+        if btn_info == "not_found":
             self._log("Redo button not found.")
             return {"status": "error", "message": "Redo button not found on page."}
+
+        # Click the redo button natively using Playwright
+        redo_loc = self._page.locator('[data-automation-temp-redo="true"]')
+        await redo_loc.click()
+        # Clean up attribute
+        try:
+            await redo_loc.evaluate("el => el.removeAttribute('data-automation-temp-redo')")
+        except:
+            pass
+
+        # Wait briefly for sub-menu if it exists
+        await asyncio.sleep(1.0)
+
+        # 3. Click "Try again" menu option if present
+        try_again_info = await self._page.evaluate('''() => {
+            const findByText = (txt) => Array.from(document.querySelectorAll('gem-menu-item, gem-menu-item-content, .menu-text, span, button'))
+                                            .reverse()
+                                            .find(b => b.innerText.toLowerCase().includes(txt));
+            let tryAgain = findByText("try again");
+            if (tryAgain) {
+                tryAgain.setAttribute('data-automation-temp-tryagain', 'true');
+                return "found";
+            }
+            return "not_found";
+        }''')
+
+        if try_again_info == "found":
+            try_again_loc = self._page.locator('[data-automation-temp-tryagain="true"]')
+            # Click Try again natively
+            await try_again_loc.click()
+            # Clean up attribute
+            try:
+                await try_again_loc.evaluate("el => el.removeAttribute('data-automation-temp-tryagain')")
+            except:
+                pass
+            result = "REDO_WITH_TRY_AGAIN"
+        else:
+            result = "REDO_CLICKED"
+
+        self._log(f"Redo triggered: {result}")
+        # Ensure the UI has transitioned to 'generating' before returning
+        for _ in range(15):
+            await asyncio.sleep(0.5)
+            is_gen = await self._page.evaluate('''() => {
+                return !!document.querySelector('mat-progress-bar') ||
+                       !!document.querySelector('mat-icon[data-mat-icon-name="stop"]') ||
+                       !!document.querySelector('section.processing-state_container--processing');
+            }''')
+            if is_gen:
+                break
+        return {"status": "success", "message": f"Redo action sent ({result})."}
 
     # ──────────────────────────────────────────────────────────────────────────
     # download_images
@@ -1447,7 +1481,15 @@ class GeminiProvider(ProviderAdapter):
         from PIL import Image
         import io
         import hashlib
-        from processing_utils import save_with_metadata
+        try:
+            from processing_utils import save_with_metadata
+        except ModuleNotFoundError:
+            import sys
+            from config_utils import get_project_root
+            project_core = os.path.join(get_project_root(), "core")
+            if project_core not in sys.path:
+                sys.path.insert(0, project_core)
+            from processing_utils import save_with_metadata
         seen_hashes = set()
 
         def get_image_ahash(path):
