@@ -512,18 +512,25 @@ class GeminiProvider(ProviderAdapter):
                 btn = self._page.locator('button.toolbox-drawer-button').first
                 if await btn.is_visible(timeout=2000):
                     await btn.click()
+                    self._log("Toolbox drawer button clicked (Playwright)")
                 else:
+                    self._log("Toolbox drawer button not visible — trying JS fallback")
                     await self._page.evaluate('''() => {
                         const b = Array.from(document.querySelectorAll("button"))
                                        .find(b => b.innerText.includes("Tools"));
                         if (b) b.click();
                     }''')
                 await asyncio.sleep(1.0)
+                drawer_opened = False
                 try:
-                    await self._page.wait_for_selector('mat-action-list', timeout=3000)
-                    self._log(f"Tool drawer open, looking for: {tool_name}")
+                    await self._page.wait_for_selector(
+                        'mat-action-list button[role="menuitem"]',
+                        state='visible', timeout=3000
+                    )
+                    drawer_opened = True
+                    self._log(f"Tool drawer open (upload buttons visible), looking for: {tool_name}")
                 except Exception:
-                    self._log("Tool drawer content not detected — proceeding anyway")
+                    self._log("Upload buttons not visible after drawer open attempt")
 
                 def _js_match_upload(name: str) -> str:
                     # Photos uses .menu-text.gem-menu-item-label; Notebooks uses .gem-menu-item-label only
