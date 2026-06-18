@@ -409,7 +409,14 @@ class BrowserEngine:
 
         # Mirror to stdout so the console / TUI SERVICE LOG shows these too,
         # not just the engine.log file and the in-memory queue.
-        print(log_msg, flush=True)
+        try:
+            print(log_msg, flush=True)
+        except UnicodeEncodeError:
+            enc = getattr(sys.stdout, 'encoding', None) or 'utf-8'
+            try:
+                print(log_msg.encode(enc, errors='backslashreplace').decode(enc), flush=True)
+            except Exception:
+                pass
 
         # Add to internal queue for API consumption
         if not hasattr(self, '_log_queue'):
