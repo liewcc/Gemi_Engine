@@ -1236,10 +1236,22 @@ class GeminiProvider(ProviderAdapter):
 
     async def send_chat(self, prompt: str, new_conversation: bool = True) -> dict:
         """Sends a text prompt to Gemini and waits for the text reply with robust error checks."""
-        # Step A: Enforce pre-flight clean state
-        await self.prepare_chat_state()
+        # Step A: Enforce clean state.
+        # For new_conversation, navigate directly to the landing URL — this is more
+        # reliable than clicking the New Chat button (HTML selectors change frequently).
+        # ponytail: full page.goto() resets Gemini SPA state; button-click does not.
         if new_conversation:
-            await self.new_chat()
+            try:
+                cfg = load_config()
+                landing_url = cfg.get("browser_url", "https://gemini.google.com/app")
+            except Exception:
+                landing_url = "https://gemini.google.com/app"
+            self._log(f"send_chat: navigating to {landing_url} for clean state.")
+            await self._e.navigate(landing_url)
+            # Dismiss any post-navigation overlays/banners, then verify idle
+            await self.prepare_chat_state()
+        else:
+            await self.prepare_chat_state()
 
         # Record how many model responses already exist before we submit
         existing_count = await self._page.evaluate('''() => {
@@ -2225,21 +2237,25 @@ class GeminiProvider(ProviderAdapter):
             await asyncio.sleep(2.0)
             return {"status": "success", "message": "Navigated to /app as fallback."}
 
-        self._log(f"New Chat clicked ({result}). Waiting for new conversation URL...")
+        self._log(f"New Chat clicked ({result}). Waiting for URL to return to /app...")
 
-        # After clicking New Chat, Gemini navigates to a new conversation URL.
-        # Do NOT navigate to /app — that reloads the last conversation.
-        # Instead wait for the URL to change away from the old conversation path.
+        # Gemini conversation URLs look like /app/3ddfc96f7c564ffb (no /c/ prefix).
+        # After clicking New Chat the URL returns to the bare /app path.
+        # If we're already at /app (no prior conversation), skip the wait.
         url_before = self._page.url
-        deadline = time.time() + 8.0
-        while time.time() < deadline:
-            await asyncio.sleep(0.3)
-            current_url = self._page.url
-            if current_url != url_before:
-                self._log(f"new_chat: URL changed to {current_url}")
-                break
+        already_clean = url_before.rstrip("/").endswith("/app")
+        if not already_clean:
+            deadline = time.time() + 8.0
+            while time.time() < deadline:
+                await asyncio.sleep(0.3)
+                current_url = self._page.url
+                if current_url.rstrip("/").endswith("/app"):
+                    self._log(f"new_chat: URL returned to /app ({current_url})")
+                    break
+            else:
+                self._log(f"new_chat: URL did not return to /app within 8s (still {self._page.url}) — proceeding anyway.")
         else:
-            self._log(f"new_chat: URL did not change from {url_before} within 8s — proceeding anyway.")
+            self._log("new_chat: already at /app, no wait needed.")
 
         # Wait for prompt input to be ready
         try:
