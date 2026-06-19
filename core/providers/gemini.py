@@ -1172,12 +1172,74 @@ class GeminiProvider(ProviderAdapter):
         return {"status": "timeout", "message": "Timed out waiting for image response."}
 
     # ──────────────────────────────────────────────────────────────────────────
-    # send_chat
+    # is_generating / prepare_chat_state / send_chat
     # ──────────────────────────────────────────────────────────────────────────
-    async def send_chat(self, prompt: str) -> dict:
-        """Sends a text prompt to Gemini and waits for the text reply."""
+    async def is_generating(self) -> bool:
+        """Checks if the Gemini page is currently generating a response."""
+        if not self._e.is_running or not self._page:
+            return False
+        return await self._page.evaluate('''() => {
+            const isVisible = (el) => {
+                if (!el) return false;
+                const s = window.getComputedStyle(el);
+                return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+            };
+            const stopIcon =
+                document.querySelector('mat-icon[data-mat-icon-name="stop"]') ||
+                document.querySelector('mat-icon[fonticon="stop"]') ||
+                document.querySelector('mat-icon[data-mat-icon-name="stop_circle"]') ||
+                document.querySelector('mat-icon[fonticon="stop_circle"]') ||
+                document.querySelector('mat-icon[data-mat-icon-namespace="lumi-symbols"][data-mat-icon-name="stop"]') ||
+                document.querySelector('mat-icon[data-mat-icon-namespace="lumi-symbols"][data-mat-icon-name="stop_circle"]');
+            const progressBar = document.querySelector('mat-progress-bar');
+            const activeLoadingContainer = document.querySelector('section.processing-state_container--processing');
+            return !!(stopIcon || isVisible(progressBar) || isVisible(activeLoadingContainer));
+        }''')
+
+    async def prepare_chat_state(self, wait_for_idle_timeout=15.0) -> dict:
+        """
+        Pre-flight checks to ensure the browser DOM is in a clean, idle state before interacting.
+        Dismisses dropdowns, closes drawers, dismisses modals, and waits for active generation to finish.
+        """
         if not self._e.is_running:
             raise Exception("Browser Engine not started")
+
+        # 1. URL Domain validation
+        url = self._page.url
+        if "gemini.google.com" not in url:
+            self._log(f"Warning: Page is not on Gemini domain (current URL: {url}). Navigating to app...")
+            await self._e.navigate("https://gemini.google.com/app")
+            await asyncio.sleep(2.0)
+
+        # 2. Dismiss active overlays/drawers (like model dropdown or toolbox drawer)
+        has_overlay = await self._page.evaluate('''() => {
+            const overlay = document.querySelector('.cdk-overlay-container, gem-menu, [popover]:not([style*="display: none"])');
+            return !!(overlay && overlay.offsetParent !== null);
+        }''')
+        if has_overlay:
+            self._log("Active menu overlays detected. Sending Escape to clear...")
+            await self._page.keyboard.press("Escape")
+            await asyncio.sleep(0.5)
+
+        # 3. Dismiss MMGen or file disclaimers
+        await self.dismiss_agreement_popups()
+
+        # 4. Wait for ongoing generation to complete
+        start_time = time.time()
+        while await self.is_generating():
+            if time.time() - start_time > wait_for_idle_timeout:
+                raise Exception("Gemini page is busy: active generation did not complete within the timeout.")
+            self._log("Gemini is currently generating a response. Waiting for idle...")
+            await asyncio.sleep(1.0)
+
+        return {"status": "ready"}
+
+    async def send_chat(self, prompt: str, new_conversation: bool = True) -> dict:
+        """Sends a text prompt to Gemini and waits for the text reply with robust error checks."""
+        # Step A: Enforce pre-flight clean state
+        await self.prepare_chat_state()
+        if new_conversation:
+            await self.new_chat()
 
         # Record how many model responses already exist before we submit
         existing_count = await self._page.evaluate('''() => {
@@ -1186,6 +1248,7 @@ class GeminiProvider(ProviderAdapter):
         }''')
         self._log(f"send_chat: existing responses before submit = {existing_count}")
 
+        # Step B: Inject prompt and trigger submit
         await self.send_prompt(prompt)
         await self._page.keyboard.press("Enter")
         self._log("send_chat: prompt submitted.")
@@ -1208,16 +1271,30 @@ class GeminiProvider(ProviderAdapter):
             except Exception:
                 pass
 
-        # Wait for a NEW response to appear and its content to stabilize.
-        # Strategy: look for response count > existing_count, then wait until
-        # .response-footer.complete is present on the last response OR the
-        # text has been unchanged for 3 consecutive 2-second polls (6s stable).
+        # Step C: Load quota and refusal keywords for dynamic monitoring
+        quota_kws = ["quota exceeded", "daily limit", "reached your limit"]
+        refused_kws = []
+        try:
+            from config_utils import load_quota_keywords, load_refused_keywords
+            quota_kws = [k.lower() for k in load_quota_keywords()]
+            refused_kws = load_refused_keywords()
+        except Exception as e:
+            self._log(f"Failed to load keyword files: {e}")
+
+        # Step D: Stable tracking & Response Wait Loop
         last_text = ""
         stable_count = 0
         STABLE_NEEDED = 3
 
         for i in range(120):  # 240s max
-            data = await self._page.evaluate(f'''() => {{
+            data = await self._page.evaluate(f'''(args) => {{
+                const bodyText = document.body.innerText.toLowerCase();
+
+                // 1. Quota check
+                for (const kw of args.quota) {{
+                    if (bodyText.includes(kw)) return {{ status: "quota_exceeded", text: kw }};
+                }}
+
                 const all = Array.from(document.querySelectorAll('model-response, structured-content-container.model-response-text, message-content'));
                 const responses = all.filter(el => !all.some(p => p !== el && p.contains(el)));
 
@@ -1232,16 +1309,33 @@ class GeminiProvider(ProviderAdapter):
                 cl.querySelectorAll('.cdk-visually-hidden,[aria-hidden="true"]').forEach(function(e){{ e.remove(); }});
                 const text = cl.innerText.trim();
 
+                // 2. Refusal check (streaming or complete)
+                const refusalKws = args.refused || [];
+                const isTextRefusal = refusalKws.some(kw => text.toLowerCase().includes(kw.toLowerCase()));
+                if (isTextRefusal && text.length > 0) {{
+                    return {{ status: 'refused', text: text }};
+                }}
+
                 const isComplete = !!lastResp.querySelector('.response-footer.complete');
                 return {{ status: 'has_response', text: text, complete: isComplete }};
-            }}''')
+            }}''', {"quota": quota_kws, "refused": refused_kws})
 
             status = data.get("status")
-            if status == "waiting":
+            text = data.get("text", "")
+
+            if status == "quota_exceeded":
+                self._log("send_chat failed: Quota exceeded.")
+                return {"status": "error", "message": "Quota exceeded. Please wait before retrying."}
+            
+            elif status == "refused":
+                flat_text = " ".join(text.replace('\n', ' ').split())
+                self._log(f"send_chat failed (Refused): {flat_text[:300]}")
+                return {"status": "refused", "message": f"Gemini refused: {flat_text[:300]}"}
+
+            elif status == "waiting":
                 if i % 5 == 0:
                     self._log(f"send_chat: waiting for new response... (iter {i})")
             elif status == "has_response":
-                text = data.get("text", "")
                 is_complete = data.get("complete", False)
 
                 if is_complete and text:
@@ -2125,15 +2219,41 @@ class GeminiProvider(ProviderAdapter):
             return "NOT_FOUND";
         }''')
 
-        if result != "NOT_FOUND":
-            self._log(f"New Chat triggered: {result}")
-            # Wait for navigation/reset
-            await asyncio.sleep(1.0)
-            return {"status": "success", "message": f"New Chat triggered ({result})."}
-        else:
-            self._log("New Chat button not found. Falling back to default URL.")
+        if result == "NOT_FOUND":
+            self._log("New Chat button not found — navigating to /app as fallback.")
             await self._e.navigate("https://gemini.google.com/app")
-            return {"status": "success", "message": "Navigated to default app as fallback."}
+            await asyncio.sleep(2.0)
+            return {"status": "success", "message": "Navigated to /app as fallback."}
+
+        self._log(f"New Chat clicked ({result}). Waiting for new conversation URL...")
+
+        # After clicking New Chat, Gemini navigates to a new conversation URL.
+        # Do NOT navigate to /app — that reloads the last conversation.
+        # Instead wait for the URL to change away from the old conversation path.
+        url_before = self._page.url
+        deadline = time.time() + 8.0
+        while time.time() < deadline:
+            await asyncio.sleep(0.3)
+            current_url = self._page.url
+            if current_url != url_before:
+                self._log(f"new_chat: URL changed to {current_url}")
+                break
+        else:
+            self._log(f"new_chat: URL did not change from {url_before} within 8s — proceeding anyway.")
+
+        # Wait for prompt input to be ready
+        try:
+            await self._page.wait_for_selector(
+                "div[aria-label='Enter a prompt for Gemini'], "
+                "div[aria-label='Enter a prompt here'], "
+                "div.ql-editor[contenteditable='true']",
+                state="visible",
+                timeout=5000,
+            )
+        except Exception:
+            self._log("new_chat: prompt input did not appear within 5s.")
+
+        return {"status": "success", "message": f"New chat started (url={self._page.url})."}
 
     # ──────────────────────────────────────────────────────────────────────────
     # delete_activity_history

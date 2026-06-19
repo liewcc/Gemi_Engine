@@ -617,8 +617,8 @@ class BrowserEngine:
     async def submit_response(self, text=None, expect_attachments=False):
         return await self._provider.submit_response(text, expect_attachments)
 
-    async def send_chat(self, prompt: str) -> dict:
-        return await self._provider.send_chat(prompt)
+    async def send_chat(self, prompt: str, new_conversation: bool = True) -> dict:
+        return await self._provider.send_chat(prompt, new_conversation=new_conversation)
 
     async def redo_response(self):
         return await self._provider.redo_response()
