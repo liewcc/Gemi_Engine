@@ -404,8 +404,13 @@ class DeepSeekProvider(ProviderAdapter):
     async def get_gem_info(self) -> dict:
         raise NotImplementedError("DeepSeek provider does not support get_gem_info")
 
-    async def get_account_info(self):
-        raise NotImplementedError("DeepSeek provider does not support get_account_info")
+    async def get_account_info(self) -> dict:
+        """DeepSeek dummy get_account_info to satisfy main engine switch logic."""
+        login_state = await self._check_login()
+        if login_state.get("logged_in"):
+            username = login_state.get("username", "ccliew.blog")
+            return {"status": "success", "logged_in": True, "account_id": username}
+        return {"status": "success", "logged_in": False, "account_id": ""}
 
     async def send_prompt(self, text: str):
         raise NotImplementedError("DeepSeek provider does not support send_prompt")
