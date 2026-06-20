@@ -13,6 +13,14 @@ class GeminiProvider(ProviderAdapter):
 
     BASE_URL = "https://gemini.google.com/app"
 
+    def __init__(self, engine):
+        super().__init__(engine)
+        # Cached result of discover_capabilities().  Populated once after
+        # new_chat completes (scan-on-ready) and used by apply_settings to
+        # validate model/tool names against the live Gemini UI.
+        # Keys when populated: models, main_tools, sub_tools, thinking_levels.
+        self._caps: dict | None = None
+
     # ──────────────────────────────────────────────────────────────────────────
     # send_prompt
     # ──────────────────────────────────────────────────────────────────────────
@@ -445,6 +453,68 @@ class GeminiProvider(ProviderAdapter):
         """Applies model, thinking level, and/or tool to the Gemini UI."""
         if not self._e.is_running:
             return {"status": "error", "message": "Browser not started"}
+
+        # Normalise "default" sentinel → no-op (leave tool unchanged)
+        if tool_name and tool_name.lower() == "default":
+            tool_name = None
+
+        # ── Validate against live-scanned capabilities ──────────────────
+        # If _caps is empty (e.g. no new_chat was called), scan once now.
+        if not self._caps:
+            try:
+                res = await self.discover_capabilities()
+                if res.get("status") == "success":
+                    data = res.get("data", {})
+                    self._caps = {
+                        "models": data.get("models", []),
+                        "main_tools": data.get("main_tools", []),
+                        "sub_tools": data.get("sub_tools", {}),
+                        "thinking_levels": data.get("thinking_levels", []),
+                    }
+                    self._log("apply_settings: lazy _caps populated via discover_capabilities")
+            except Exception as exc:
+                self._log(f"apply_settings: lazy discover failed (non-fatal): {exc}")
+
+        def _partial_match(name: str, options: list[str]) -> str | None:
+            """Return the first option that partial/case-insensitive matches `name`,
+            using the same logic as the JS click code (startsWith both ways)."""
+            nl = name.lower()
+            for opt in options:
+                ol = opt.lower()
+                if ol.startswith(nl) or nl.startswith(ol):
+                    return opt
+            return None
+
+        if self._caps:
+            # Validate model
+            if model_name:
+                models = self._caps.get("models", [])
+                if models and not _partial_match(model_name, models):
+                    return {
+                        "status": "error",
+                        "message": f"model '{model_name}' not found in live UI. "
+                                   f"Available: {models}",
+                    }
+            # Validate tool — check main_tools + all sub_tools values
+            if tool_name:
+                all_tools = list(self._caps.get("main_tools", []))
+                for sub_list in self._caps.get("sub_tools", {}).values():
+                    all_tools.extend(sub_list)
+                if all_tools and not _partial_match(tool_name, all_tools):
+                    return {
+                        "status": "error",
+                        "message": f"tool '{tool_name}' not found in live UI. "
+                                   f"Available: {all_tools}",
+                    }
+            # Validate thinking level
+            if thinking_level:
+                levels = self._caps.get("thinking_levels", [])
+                if levels and not _partial_match(thinking_level, levels):
+                    return {
+                        "status": "error",
+                        "message": f"thinking_level '{thinking_level}' not found in live UI. "
+                                   f"Available: {levels}",
+                    }
 
         applied = []
         try:
@@ -2268,6 +2338,26 @@ class GeminiProvider(ProviderAdapter):
             )
         except Exception:
             self._log("new_chat: prompt input did not appear within 5s.")
+
+        # Scan-on-ready: Gemini's model/tool menus change over time, so we
+        # discover capabilities once after every new chat to keep _caps fresh.
+        # apply_settings then validates against _caps before clicking.
+        try:
+            res = await self.discover_capabilities()
+            if res.get("status") == "success":
+                data = res.get("data", {})
+                self._caps = {
+                    "models": data.get("models", []),
+                    "main_tools": data.get("main_tools", []),
+                    "sub_tools": data.get("sub_tools", {}),
+                    "thinking_levels": data.get("thinking_levels", []),
+                }
+                self._log(f"Scan-on-ready cached: {len(self._caps['models'])} models, "
+                          f"{len(self._caps['main_tools'])} tools")
+            else:
+                self._log(f"Scan-on-ready failed: {res.get('message')}. _caps unchanged.")
+        except Exception as exc:
+            self._log(f"Scan-on-ready error (non-fatal): {exc}")
 
         return {"status": "success", "message": f"New chat started (url={self._page.url})."}
 

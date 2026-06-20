@@ -1586,7 +1586,7 @@ async def discover_capabilities():
 
 class SettingsRequest(BaseModel):
     model: str = None
-    tool: str = None
+    tool: str = "default"
     thinking_level: str = None
 
 @app.post("/browser/apply_settings")
