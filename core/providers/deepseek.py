@@ -32,6 +32,14 @@ class DeepSeekProvider(ProviderAdapter):
             self._log(f"DeepSeek: Warning - Input element not found or not visible: {e}")
 
         await self.dismiss_agreement_popups()
+        login_state = await self._check_login()
+        if not login_state.get("logged_in"):
+            self._log("DeepSeek: Not logged in — human action required.")
+            return {
+                "status": "login_required",
+                "message": "DeepSeek is not logged in. Please log in manually in the browser window, then call new_chat() again."
+            }
+        self._log(f"DeepSeek: Logged in as '{login_state.get('username', 'unknown')}'.")
         return {"status": "success"}
 
     async def send_chat(self, prompt: str, **kwargs) -> dict:
@@ -42,7 +50,9 @@ class DeepSeekProvider(ProviderAdapter):
         new_conversation = kwargs.get("new_conversation", True)
         if new_conversation:
             self._log("send_chat: initiating a new chat for clean state.")
-            await self.new_chat()
+            nav_result = await self.new_chat()
+            if nav_result.get("status") == "login_required":
+                return nav_result
 
         # Target input
         input_selector = "textarea[placeholder='Message DeepSeek']"
@@ -123,6 +133,31 @@ class DeepSeekProvider(ProviderAdapter):
                 self._log(f"DeepSeek: Auto-dismissed agreement popup by clicking button with text: {clicked}")
         except Exception as e:
             self._log(f"DeepSeek: Warning in dismiss_agreement_popups: {e}")
+
+    async def _check_login(self) -> dict:
+        """Detect login state by looking for the user avatar image in the sidebar.
+        Returns {"logged_in": True, "username": "..."} or {"logged_in": False}.
+        """
+        try:
+            result = await self._page.evaluate("""
+                () => {
+                    const avatar = document.querySelector('img[src*="user-avatar"]');
+                    if (!avatar) return { logged_in: false };
+                    // Walk up to find sibling text element (username)
+                    const wrapper = avatar.closest('div');
+                    const nameEl = wrapper
+                        ? wrapper.parentElement
+                            ? wrapper.parentElement.querySelector('div:not(:has(img))')
+                            : null
+                        : null;
+                    const username = nameEl ? nameEl.textContent.trim() : null;
+                    return { logged_in: true, username: username || 'unknown' };
+                }
+            """)
+            return result
+        except Exception as e:
+            self._log(f"DeepSeek: _check_login error: {e}")
+            return {"logged_in": False}
 
     async def stop_response(self):
         """Click stop button if visible."""
