@@ -1682,7 +1682,7 @@ class GeminiProvider(ProviderAdapter):
         except ModuleNotFoundError:
             import sys
             from config_utils import get_project_root
-            project_core = os.path.join(get_project_root(), "core")
+            project_core = os.path.join(get_project_root(), os.getenv("BROWSER_ENGINE_DATA_SUBDIR", "core"))
             if project_core not in sys.path:
                 sys.path.insert(0, project_core)
             from processing_utils import save_with_metadata

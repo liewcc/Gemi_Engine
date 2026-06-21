@@ -41,6 +41,8 @@ from datetime import datetime
 from config_utils import load_config, save_config
 from contextlib import asynccontextmanager
 
+_DATA_SUBDIR = os.getenv("BROWSER_ENGINE_DATA_SUBDIR", "core")
+
 # Fix for Windows asyncio NotImplementedError with subprocesses
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
@@ -190,7 +192,7 @@ async def start_engine(req: PersonaRequest | None = None):
                     if active_user:
                         # Map to profile
                         lookup_path = get_abs_path("data/user_login_lookup.json")
-                        local_state_path = get_abs_path(os.path.join(os.path.join("core", "browser_user_data"), "Local State"))
+                        local_state_path = get_abs_path(os.path.join(os.path.join(_DATA_SUBDIR, "browser_user_data"), "Local State"))
                         if os.path.exists(local_state_path):
                             with open(local_state_path, "r", encoding="utf-8") as f:
                                 state = json.load(f)
@@ -198,7 +200,7 @@ async def start_engine(req: PersonaRequest | None = None):
                                 for p_dir, p_info in info_cache.items():
                                     u_name = p_info.get("user_name")
                                     if u_name and active_user.split('@')[0].lower() == u_name.split('@')[0].lower():
-                                        p_path = get_abs_path(os.path.join("core", "browser_user_data", p_dir))
+                                        p_path = get_abs_path(os.path.join(_DATA_SUBDIR, "browser_user_data", p_dir))
                                         if os.path.exists(p_path):
                                             active_profile = p_dir
         except:
@@ -381,7 +383,7 @@ async def perform_switch_logic(h: bool = None, direction: int = 1, target_userna
     
     if not os.path.exists(lookup_path):
         return {"status": "error", "message": "user_login_lookup.json not found"}
-    local_state_path = get_abs_path(os.path.join(os.path.join("core", "browser_user_data"), "Local State"))
+    local_state_path = get_abs_path(os.path.join(os.path.join(_DATA_SUBDIR, "browser_user_data"), "Local State"))
 
     # 1. Detect current user
     current_email = None
@@ -490,7 +492,7 @@ async def perform_switch_logic(h: bool = None, direction: int = 1, target_userna
                     info_cache = state.get("profile", {}).get("info_cache", {})
                     for p_dir, p_info in info_cache.items():
                         if normalize(p_info.get("user_name")) == norm_email:
-                            p_path = get_abs_path(os.path.join("core", "browser_user_data", p_dir))
+                            p_path = get_abs_path(os.path.join(_DATA_SUBDIR, "browser_user_data", p_dir))
                             if os.path.exists(p_path):
                                 cand_profile = p_dir
         except: continue
@@ -524,7 +526,7 @@ async def perform_switch_logic(h: bool = None, direction: int = 1, target_userna
                         pass  # Unparseable timestamp — do not skip
 
         if cand_profile:
-            prof_dir = get_abs_path(os.path.join(os.path.join("core", "browser_user_data"), cand_profile))
+            prof_dir = get_abs_path(os.path.join(os.path.join(_DATA_SUBDIR, "browser_user_data"), cand_profile))
             if os.path.exists(prof_dir):
                 profile_name = cand_profile
                 target_user = candidate

@@ -60,7 +60,7 @@ async def _start_engine(port: int) -> subprocess.Popen:
     # DATA_DIR must point to the *project* core (where browser_user_data/ and
     # browser_session_sandbox/ live), not the engine submodule's core.
     # This mirrors how tui/app.py sets BROWSER_ENGINE_DATA_DIR = ROOT/core.
-    _project_core = os.path.join(_PROJECT_ROOT, "core")
+    _project_core = os.path.join(_PROJECT_ROOT, os.getenv("BROWSER_ENGINE_DATA_SUBDIR", "core"))
     env = {
         **os.environ,
         "BROWSER_ENGINE_PROJECT_ROOT": _PROJECT_ROOT,
