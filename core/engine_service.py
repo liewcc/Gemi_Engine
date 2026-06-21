@@ -158,6 +158,9 @@ async def clear_engine_logs():
 
 @app.post("/engine/start")
 async def start_engine(req: PersonaRequest | None = None):
+    if engine.is_running:
+        return {"message": "Engine already running", "status": "already_running"}
+
     def get_abs_path(rel_path):
         return os.path.join(_PROJECT_ROOT, rel_path)
 
@@ -195,8 +198,9 @@ async def start_engine(req: PersonaRequest | None = None):
                                 for p_dir, p_info in info_cache.items():
                                     u_name = p_info.get("user_name")
                                     if u_name and active_user.split('@')[0].lower() == u_name.split('@')[0].lower():
-                                        active_profile = p_dir
-                                        break
+                                        p_path = get_abs_path(os.path.join("core", "browser_user_data", p_dir))
+                                        if os.path.exists(p_path):
+                                            active_profile = p_dir
         except:
             pass
 
@@ -226,9 +230,9 @@ async def stop_engine():
 
 @app.post("/engine/start_registration")
 async def start_registration():
-    """Opens a headed browser directly against browser_user_data/ for profile registration."""
+    """Opens a headed browser on a fresh profile for account registration."""
     if engine.is_running:
-        raise HTTPException(status_code=400, detail="Stop the main browser before opening Registration Mode.")
+        await engine.stop()
     try:
         await engine.start_registration()
         return {"status": "success", "message": "Registration browser opened. Add your Google account, then close the browser window or call stop_registration."}
@@ -486,8 +490,9 @@ async def perform_switch_logic(h: bool = None, direction: int = 1, target_userna
                     info_cache = state.get("profile", {}).get("info_cache", {})
                     for p_dir, p_info in info_cache.items():
                         if normalize(p_info.get("user_name")) == norm_email:
-                            cand_profile = p_dir
-                            break
+                            p_path = get_abs_path(os.path.join("core", "browser_user_data", p_dir))
+                            if os.path.exists(p_path):
+                                cand_profile = p_dir
         except: continue
 
         # Skip accounts flagged as Bypass
