@@ -1357,9 +1357,8 @@ class GeminiProvider(ProviderAdapter):
         quota_kws = ["quota exceeded", "daily limit", "reached your limit"]
         refused_kws = []
         try:
-            from config_utils import load_quota_keywords, load_refused_keywords
+            from config_utils import load_quota_keywords
             quota_kws = [k.lower() for k in load_quota_keywords()]
-            refused_kws = load_refused_keywords()
         except Exception as e:
             self._log(f"Failed to load keyword files: {e}")
 
@@ -1391,13 +1390,6 @@ class GeminiProvider(ProviderAdapter):
                 cl.querySelectorAll('.cdk-visually-hidden,[aria-hidden="true"]').forEach(function(e){{ e.remove(); }});
                 const text = cl.innerText.trim();
 
-                // 2. Refusal check (streaming or complete)
-                const refusalKws = args.refused || [];
-                const isTextRefusal = refusalKws.some(kw => text.toLowerCase().includes(kw.toLowerCase()));
-                if (isTextRefusal && text.length > 0) {{
-                    return {{ status: 'refused', text: text }};
-                }}
-
                 const isComplete = !!lastResp.querySelector('.response-footer.complete');
                 return {{ status: 'has_response', text: text, complete: isComplete }};
             }}''', {"quota": quota_kws, "refused": refused_kws})
@@ -1408,11 +1400,6 @@ class GeminiProvider(ProviderAdapter):
             if status == "quota_exceeded":
                 self._log("send_chat failed: Quota exceeded.")
                 return {"status": "error", "message": "Quota exceeded. Please wait before retrying."}
-            
-            elif status == "refused":
-                flat_text = " ".join(text.replace('\n', ' ').split())
-                self._log(f"send_chat failed (Refused): {flat_text[:300]}")
-                return {"status": "refused", "message": f"Gemini refused: {flat_text[:300]}"}
 
             elif status == "waiting":
                 if i % 5 == 0:
