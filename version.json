@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
-  "date": "2026-06-20",
-  "notes": "Add DeepSeek provider with full service-switching support: new_chat, send_chat, attach_files (upload detection via ds-button--disabled), apply_settings (Instant/Expert/Vision), redo_response (SVG path fingerprint), stop_response, get_last_response, get_account_info. Login detection via textarea presence — auto-relaunches headed browser for human verification when needed. Switch between Gemini and DeepSeek at runtime via switch_service MCP tool."
+  "version": "1.1.1",
+  "date": "2026-06-21",
+  "notes": "Fix: sync is_running when browser is closed externally. Register context.on('close') in start() so the TUI button reflects real browser state after user closes the headed fallback window."
 }
