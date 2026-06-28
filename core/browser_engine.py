@@ -431,12 +431,20 @@ class BrowserEngine:
         # When connecting over CDP, Chrome may restore stale tabs (e.g. myactivity.google.com).
         # These orphan tabs cause the user to see the wrong landing page.
         # Only applies to the CDP path — launch_persistent_context starts with no pages.
+        # ponytail: open a keeper tab first so Chrome doesn't exit when all orphans are closed
+        # (Windows closes Chrome when the last tab is removed).
         if hasattr(self, '_chrome_proc') and self._chrome_proc:
-            try:
-                for existing_page in list(self._context.pages):
-                    await existing_page.close()
-            except Exception:
-                pass
+            orphans = list(self._context.pages)
+            if orphans:
+                try:
+                    await self._context.new_page()  # keeper — prevents Chrome from exiting
+                    for page in orphans:
+                        try:
+                            await page.close()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
         if len(self._prewarm) > 1:
             # Multiple-tab mode: create one page per pre-warm service concurrently.

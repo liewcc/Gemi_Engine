@@ -1,5 +1,5 @@
 {
-  "version": "1.3.2",
+  "version": "1.3.3",
   "date": "2026-06-28",
-  "notes": "fix: clear Chrome session restore (Sessions/ + Preferences) on sandbox prep; close CDP orphan tabs on connect; navigate single-tab mode to starting URL."
+  "notes": "fix: open keeper tab before closing CDP orphan tabs so Chrome does not exit on Windows when last tab is removed."
 }
