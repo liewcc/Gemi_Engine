@@ -135,12 +135,13 @@ async def heartbeat():
 @app.get("/health")
 async def health():
     return {
-        "status": "ok", 
+        "status": "ok",
         "engine_running": engine.is_running,
         "automation_running": engine.automation_status.get("is_running", False),
         "service_pid": os.getpid(),
         "browser_pids": engine.browser_pids if engine.is_running else [],
-        "registration_running": engine._reg_context is not None
+        "registration_running": engine._reg_context is not None,
+        "display_name": engine.automation_status.get("current_display_name") or ""
     }
 
 @app.get("/browser/status")
@@ -595,7 +596,8 @@ async def perform_switch_logic(h: bool = None, direction: int = 1, target_userna
         acc_info = await engine.get_account_info()
         is_logged_in = acc_info.get("logged_in", False)
         current_id = acc_info.get("account_id")
-        
+        engine.automation_status["current_display_name"] = acc_info.get("display_name") or current_id or ""
+
         if not is_logged_in or not check_match(current_id, target_user['username']):
             if h_val: # If we are in headless mode, try headed fallback
                 print(f"[ENGINE] Headless login check failed for {target_user['username']}. Attempting headed fallback...")

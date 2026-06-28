@@ -1,5 +1,5 @@
 {
-  "version": "1.3.5",
+  "version": "1.3.6",
   "date": "2026-06-28",
-  "notes": "fix: DeepSeek get_account_info returns active_user from config (not display name) so check_match passes without headed fallback."
+  "notes": "feat: expose display_name in health endpoint and TUI status bar; DeepSeek get_account_info returns both account_id and display_name."
 }

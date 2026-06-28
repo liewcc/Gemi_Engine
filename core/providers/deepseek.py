@@ -448,8 +448,9 @@ class DeepSeekProvider(ProviderAdapter):
                 account_id = cfg.get("active_user") or login_state.get("username", "unknown")
             except Exception:
                 account_id = login_state.get("username", "unknown")
-            return {"status": "success", "logged_in": True, "account_id": account_id}
-        return {"status": "success", "logged_in": False, "account_id": ""}
+            display_name = login_state.get("username") or account_id
+            return {"status": "success", "logged_in": True, "account_id": account_id, "display_name": display_name}
+        return {"status": "success", "logged_in": False, "account_id": "", "display_name": ""}
 
     async def send_prompt(self, text: str):
         raise NotImplementedError("DeepSeek provider does not support send_prompt")
