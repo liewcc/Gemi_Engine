@@ -1,5 +1,5 @@
 {
-  "version": "1.3.4",
+  "version": "1.3.5",
   "date": "2026-06-28",
-  "notes": "fix: use taskkill /F /T on Windows to kill entire Chrome process tree, preventing zombie child processes on stop/restart."
+  "notes": "fix: DeepSeek get_account_info returns active_user from config (not display name) so check_match passes without headed fallback."
 }

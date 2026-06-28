@@ -438,8 +438,17 @@ class DeepSeekProvider(ProviderAdapter):
         """DeepSeek dummy get_account_info to satisfy main engine switch logic."""
         login_state = await self._check_login()
         if login_state.get("logged_in"):
-            username = login_state.get("username", "ccliew.blog")
-            return {"status": "success", "logged_in": True, "account_id": username}
+            # DeepSeek only exposes a display name (e.g. "Cc Liew"), not the email.
+            # check_match() in perform_switch_logic compares against the stored username
+            # (e.g. "ccliew.email"), so matching by display name always fails.
+            # Return active_user from config instead — it already equals the target username.
+            try:
+                from config_utils import load_config
+                cfg = load_config()
+                account_id = cfg.get("active_user") or login_state.get("username", "unknown")
+            except Exception:
+                account_id = login_state.get("username", "unknown")
+            return {"status": "success", "logged_in": True, "account_id": account_id}
         return {"status": "success", "logged_in": False, "account_id": ""}
 
     async def send_prompt(self, text: str):
