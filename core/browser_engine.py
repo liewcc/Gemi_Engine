@@ -68,9 +68,20 @@ class BrowserEngine:
         self._reg_context = None
         # Last image src seen before submit (used by submit_response for change detection)
         self._last_seen_src = None
-        # Gemini provider delegate
+        # Initialize providers
+        self._providers = {
+            "gemini": GeminiProvider(self),
+            "deepseek": DeepSeekProvider(self)
+        }
         self._active_service = "gemini"
-        self._provider = GeminiProvider(self)
+        self._provider = self._providers["gemini"]
+        
+        # Dual-tab support
+        self._pages = {
+            "gemini": None,
+            "deepseek": None
+        }
+        self._dual_tab = os.environ.get("BROWSER_ENGINE_DUAL_TAB", "").lower() == "true"
 
 
 
@@ -292,9 +303,55 @@ class BrowserEngine:
         # if headless:
         #    await self.inject_session_state()
 
-        self._page = await self._context.new_page()
-        await self.apply_hardcore_stealth(self._page)
-        
+        if self._dual_tab:
+            # Create two pages/tabs concurrently
+            self._pages["gemini"] = await self._context.new_page()
+            await self.apply_hardcore_stealth(self._pages["gemini"])
+            
+            self._pages["deepseek"] = await self._context.new_page()
+            await self.apply_hardcore_stealth(self._pages["deepseek"])
+            
+            # Explicitly bind the providers to their own tabs
+            self._providers["gemini"]._page = self._pages["gemini"]
+            self._providers["deepseek"]._page = self._pages["deepseek"]
+            
+            # Set default active page & provider to Gemini
+            self._page = self._pages["gemini"]
+            self._provider = self._providers["gemini"]
+            self._active_service = "gemini"
+            
+            # Concurrent pre-warming: Gemini must succeed, DeepSeek is non-fatal
+            self._log_debug("Eager dual-tab init: pre-warming Gemini and DeepSeek tabs concurrently...")
+            
+            async def init_gemini():
+                try:
+                    await self._pages["gemini"].goto(self._providers["gemini"].BASE_URL, wait_until="domcontentloaded", timeout=45000)
+                    await self._providers["gemini"].dismiss_agreement_popups()
+                    self._log_debug("Gemini tab pre-warmed successfully.")
+                    return True
+                except Exception as e:
+                    self._log_debug(f"Critical error pre-warming Gemini tab: {e}")
+                    raise
+                    
+            async def init_deepseek():
+                try:
+                    await self._pages["deepseek"].goto(self._providers["deepseek"].BASE_URL, wait_until="domcontentloaded", timeout=45000)
+                    await self._providers["deepseek"].dismiss_agreement_popups()
+                    self._log_debug("DeepSeek tab pre-warmed successfully.")
+                    return True
+                except Exception as e:
+                    self._log_debug(f"Non-critical warning pre-warming DeepSeek tab: {e}")
+                    return False
+            
+            results = await asyncio.gather(init_gemini(), init_deepseek(), return_exceptions=True)
+            if isinstance(results[0], Exception):
+                raise results[0]
+        else:
+            self._page = await self._context.new_page()
+            await self.apply_hardcore_stealth(self._page)
+            # In single-tab mode, ensure active provider uses it
+            self._provider._page = self._page
+            
         # Force minimize for non-headless mode.
         # --start-minimized gets overridden by Playwright's new_page(), so we
         # re-minimize via CDP to keep the headed fallback window invisible.
@@ -348,6 +405,12 @@ class BrowserEngine:
             pass
             
         self._page = None
+        self._pages = {
+            "gemini": None,
+            "deepseek": None
+        }
+        for name in self._providers:
+            self._providers[name]._page = None
         self._context = None
         self._browser = None
         self._playwright = None
@@ -652,23 +715,46 @@ class BrowserEngine:
         return await self._provider.new_chat(target_url)
 
     async def switch_provider(self, service_name: str) -> dict:
-        """Switch the active provider. Navigates to the new service's URL."""
+        """Switch the active provider."""
         name = service_name.lower().strip()
         cls = self._PROVIDER_REGISTRY.get(name)
         if cls is None:
             available = list(self._PROVIDER_REGISTRY.keys())
             return {"status": "error", "message": f"Unknown service '{name}'. Available: {available}"}
+        
         if name == self._active_service:
+            if self._dual_tab and self._page:
+                try:
+                    await self._page.bring_to_front()
+                except Exception:
+                    pass
             return {"status": "success", "message": f"Already using {name}"}
-        new_provider = cls(self)
-        try:
-            if self._page and not self._page.is_closed():
-                await self._page.goto(cls.BASE_URL, wait_until="domcontentloaded", timeout=15000)
-        except Exception as e:
-            self._log_debug(f"switch_provider: navigation warning: {e}")
-        self._provider = new_provider
-        self._active_service = name
-        return {"status": "success", "message": f"Switched to {name}"}
+        
+        if self._dual_tab:
+            target_page = self._pages.get(name)
+            if not target_page or target_page.is_closed():
+                return {"status": "error", "message": f"Page for service '{name}' is not open/ready."}
+            
+            self._page = target_page
+            self._provider = self._providers[name]
+            self._active_service = name
+            
+            try:
+                await self._page.bring_to_front()
+            except Exception as e:
+                self._log_debug(f"switch_provider (dual-tab): bring_to_front warning: {e}")
+                
+            return {"status": "success", "message": f"Switched active tab to {name}"}
+        else:
+            new_provider = cls(self)
+            try:
+                if self._page and not self._page.is_closed():
+                    await self._page.goto(cls.BASE_URL, wait_until="domcontentloaded", timeout=15000)
+            except Exception as e:
+                self._log_debug(f"switch_provider: navigation warning: {e}")
+            self._provider = new_provider
+            self._active_service = name
+            return {"status": "success", "message": f"Switched to {name}"}
 
 
     async def delete_activity_history(self, range_name: str = "Last hour"):

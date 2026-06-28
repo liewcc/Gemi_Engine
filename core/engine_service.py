@@ -72,10 +72,12 @@ class NavigateRequest(BaseModel):
 
 class PromptRequest(BaseModel):
     text: str | None = None
+    service: str | None = None
 
 class ChatRequest(BaseModel):
     text: str
     new_conversation: bool = True
+    service: str | None = None
 
 
 class SwitchServiceRequest(BaseModel):
@@ -108,6 +110,17 @@ async def lifespan(app: FastAPI):
     print("Engine Service Stopped.")
 
 app = FastAPI(title="GemiPersona Engine Service", lifespan=lifespan)
+
+async def select_service(service: str | None = None):
+    """Stateless service selector. Returns the target provider instance."""
+    if service:
+        service_name = service.lower().strip()
+        if service_name != engine._active_service:
+            res = await engine.switch_provider(service_name)
+            if res.get("status") == "error":
+                raise HTTPException(status_code=400, detail=res.get("message"))
+        return engine._providers[service_name]
+    return engine._provider
 
 @app.post("/engine/heartbeat")
 async def heartbeat():
@@ -1549,26 +1562,29 @@ async def send_prompt(req: PromptRequest):
     if not engine.is_running:
         raise HTTPException(status_code=400, detail="Engine not running")
     try:
-        result = await engine.send_prompt(req.text)
+        provider = await select_service(req.service)
+        result = await provider.send_prompt(req.text)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 @app.post("/browser/attach_files")
-async def attach_files(file_paths: list[str] = Body(...)):
+async def attach_files(file_paths: list[str] = Body(...), service: str | None = Query(None)):
     if not engine.is_running:
         raise HTTPException(status_code=400, detail="Engine not running")
     try:
-        result = await engine.attach_files(file_paths)
+        provider = await select_service(service)
+        result = await provider.attach_files(file_paths)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/browser/clear_attachments")
-async def clear_attachments():
+async def clear_attachments(service: str | None = Query(None)):
     if not engine.is_running:
         raise HTTPException(status_code=400, detail="Engine not running")
     try:
-        result = await engine.clear_attachments()
+        provider = await select_service(service)
+        result = await provider.clear_attachments()
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1579,11 +1595,12 @@ async def reset_time_timer():
     return {"status": "success"}
 
 @app.post("/browser/discover")
-async def discover_capabilities():
+async def discover_capabilities(service: str | None = Query(None)):
     if not engine.is_running:
         raise HTTPException(status_code=400, detail="Engine not running")
     try:
-        result = await engine.discover_capabilities()
+        provider = await select_service(service)
+        result = await provider.discover_capabilities()
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1592,13 +1609,15 @@ class SettingsRequest(BaseModel):
     model: str = None
     tool: str = "default"
     thinking_level: str = None
+    service: str | None = None
 
 @app.post("/browser/apply_settings")
 async def apply_settings(req: SettingsRequest):
     if not engine.is_running:
         raise HTTPException(status_code=400, detail="Engine not running")
     try:
-        result = await engine.apply_settings(
+        provider = await select_service(req.service)
+        result = await provider.apply_settings(
             model_name=req.model,
             tool_name=req.tool,
             thinking_level=req.thinking_level,
@@ -1608,21 +1627,23 @@ async def apply_settings(req: SettingsRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/browser/gem_title")
-async def get_gem_title():
+async def get_gem_title(service: str | None = Query(None)):
     if not engine.is_running:
         raise HTTPException(status_code=400, detail="Engine not running")
     try:
-        result = await engine.get_gem_title()
+        provider = await select_service(service)
+        result = await provider.get_gem_title()
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/browser/gem_info")
-async def get_gem_info():
+async def get_gem_info(service: str | None = Query(None)):
     if not engine.is_running:
         raise HTTPException(status_code=400, detail="Engine not running")
     try:
-        result = await engine.get_gem_info()
+        provider = await select_service(service)
+        result = await provider.get_gem_info()
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1635,8 +1656,11 @@ async def submit_response(req: PromptRequest | None = None):
         # Clear leftover stop signal from Automation Loop when using Single Action
         if not engine.automation_status.get("is_running"):
             engine._stop_automation_event.clear()
+        
+        service = req.service if req else None
+        provider = await select_service(service)
         text = req.text if req else None
-        result = await engine.submit_response(text=text)
+        result = await provider.submit_response(text=text)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1650,7 +1674,8 @@ async def send_chat(req: ChatRequest):
         raise HTTPException(status_code=409, detail="Automation is running; stop it before using chat.")
     try:
         engine._stop_automation_event.clear()
-        result = await engine.send_chat(req.text, new_conversation=req.new_conversation)
+        provider = await select_service(req.service)
+        result = await provider.send_chat(req.text, new_conversation=req.new_conversation)
         return result
     except HTTPException:
         raise
@@ -1658,11 +1683,12 @@ async def send_chat(req: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/browser/last_response")
-async def get_last_response():
+async def get_last_response(service: str | None = Query(None)):
     if not engine.is_running:
         raise HTTPException(status_code=400, detail="Engine not running")
     try:
-        result = await engine.get_last_response()
+        provider = await select_service(service)
+        result = await provider.get_last_response()
         return {"status": "success", **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1784,30 +1810,32 @@ async def get_profiles_status():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/browser/stop")
-async def stop_response():
+async def stop_response(service: str | None = Query(None)):
     if not engine.is_running:
         raise HTTPException(status_code=400, detail="Engine not running")
     try:
-        result = await engine.stop_response()
+        provider = await select_service(service)
+        result = await provider.stop_response()
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/browser/redo")
-async def redo_response():
+async def redo_response(service: str | None = Query(None)):
     if not engine.is_running:
         raise HTTPException(status_code=400, detail="Engine not running")
     try:
         # Clear leftover stop signal from Automation Loop when using Single Action
         if not engine.automation_status.get("is_running"):
             engine._stop_automation_event.clear()
-        result = await engine.redo_response()
+        provider = await select_service(service)
+        result = await provider.redo_response()
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/browser/new_chat")
-async def new_chat():
+async def new_chat(service: str | None = Query(None)):
     if not engine.is_running:
         raise HTTPException(status_code=400, detail="Engine not running")
     try:
@@ -1821,7 +1849,8 @@ async def new_chat():
                     target_url = cfg.get("browser_url")
             except: pass
             
-        result = await engine.new_chat(target_url=target_url)
+        provider = await select_service(service)
+        result = await provider.new_chat(target_url=target_url)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -8,10 +8,15 @@ class ProviderAdapter(ABC):
 
     def __init__(self, engine):
         self._e = engine
+        self._page_ref = None
 
     @property
     def _page(self):
-        return self._e._page
+        return self._page_ref or self._e._page
+
+    @_page.setter
+    def _page(self, value):
+        self._page_ref = value
 
     def _log(self, msg, event_type=None):
         self._e._log_debug(msg, event_type)
