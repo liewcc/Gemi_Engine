@@ -386,8 +386,15 @@ class BrowserEngine:
                 self._log_debug(f"Failed to connect to Chrome over CDP: {e}")
                 if hasattr(self, '_chrome_proc') and self._chrome_proc:
                     try:
-                        self._chrome_proc.terminate()
-                    except:
+                        pid = self._chrome_proc.pid
+                        if sys.platform == "win32":
+                            subprocess.run(
+                                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                                capture_output=True,
+                            )
+                        else:
+                            self._chrome_proc.terminate()
+                    except Exception:
                         pass
                     self._chrome_proc = None
                 self._context = None
@@ -557,11 +564,19 @@ class BrowserEngine:
         
         if hasattr(self, '_chrome_proc') and self._chrome_proc:
             try:
-                self._chrome_proc.terminate()
+                pid = self._chrome_proc.pid
+                if sys.platform == "win32":
+                    # terminate() only kills the parent; use taskkill /T to kill the whole tree
+                    subprocess.run(
+                        ["taskkill", "/F", "/T", "/PID", str(pid)],
+                        capture_output=True,
+                    )
+                else:
+                    self._chrome_proc.terminate()
             except Exception:
                 pass
             self._chrome_proc = None
-            
+
         # Final cleanup
         await self._cleanup_sandbox()
 
