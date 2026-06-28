@@ -1,5 +1,5 @@
 {
-  "version": "1.3.6",
+  "version": "1.3.7",
   "date": "2026-06-28",
-  "notes": "feat: expose display_name in health endpoint and TUI status bar; DeepSeek get_account_info returns both account_id and display_name."
+  "notes": "fix: auto-switch provider to match target_url before get_account_info in perform_switch_logic, so DeepSeek login check uses DeepSeekProvider not GeminiProvider."
 }

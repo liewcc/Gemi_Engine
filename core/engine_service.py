@@ -584,14 +584,23 @@ async def perform_switch_logic(h: bool = None, direction: int = 1, target_userna
     await engine.start(headless=h_val, profile_name=profile_name)
     print(f"[ENGINE] Navigating to: {target_url}")
     await engine.navigate(target_url)
-    
+
+    # Auto-select the provider that matches target_url so get_account_info()
+    # uses the correct login-detection logic (e.g. DeepSeek, not Gemini).
+    for _svc, _prov in engine._providers.items():
+        if hasattr(_prov, "BASE_URL") and _prov.BASE_URL in target_url:
+            if _svc != engine._active_service:
+                await engine.switch_provider(_svc)
+                print(f"[ENGINE] Switched active provider to: {_svc}")
+            break
+
     # --- Headless Login Fallback Logic ---
     await asyncio.sleep(3.0) # Wait for initial load
-    
+
     def check_match(current_id, expected_user):
         if not current_id: return False
         return normalize(current_id) == normalize(expected_user)
-        
+
     try:
         acc_info = await engine.get_account_info()
         is_logged_in = acc_info.get("logged_in", False)
